@@ -55,6 +55,8 @@ namespace BACKWARD
 		const float3* dL_dmean2D,
 		const float* dL_dconics,
 		glm::vec3* dL_dmeans,
+		float* dL_dview_matrix,
+		float* dL_dproj_matrix,
 		float* dL_dcolor,
 		float* dL_dcov3D,
 		float* dL_dsh,
