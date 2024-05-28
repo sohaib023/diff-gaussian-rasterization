@@ -13,6 +13,7 @@
 #include "auxiliary.h"
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
+#include <cstdio>
 namespace cg = cooperative_groups;
 
 // Backward pass for conversion of spherical harmonics to RGB for
@@ -149,6 +150,7 @@ __global__ void computeCov2DCUDA(int P,
 	const float tan_fovx, float tan_fovy,
 	const float* view_matrix,
 	const float* dL_dconics,
+	float* dL_dview_matrix,
 	float3* dL_dmeans,
 	float* dL_dcov)
 {
@@ -164,7 +166,7 @@ __global__ void computeCov2DCUDA(int P,
 	float3 mean = means[idx];
 	float3 dL_dconic = { dL_dconics[4 * idx], dL_dconics[4 * idx + 1], dL_dconics[4 * idx + 3] };
 	float3 t = transformPoint4x3(mean, view_matrix);
-	
+
 	const float limx = 1.3f * tan_fovx;
 	const float limy = 1.3f * tan_fovy;
 	const float txtz = t.x / t.z;
@@ -254,6 +256,60 @@ __global__ void computeCov2DCUDA(int P,
 	float dL_dJ11 = W[1][0] * dL_dT10 + W[1][1] * dL_dT11 + W[1][2] * dL_dT12;
 	float dL_dJ12 = W[2][0] * dL_dT10 + W[2][1] * dL_dT11 + W[2][2] * dL_dT12;
 
+	float dL_dW00 = J[0][0] * dL_dT00;
+	float dL_dW10 = J[1][1] * dL_dT10;
+	float dL_dW20 = J[0][2] * dL_dT00 + J[1][2] * dL_dT10;
+	
+	float dL_dW01 = J[0][0] * dL_dT01;
+	float dL_dW11 = J[1][1] * dL_dT11;
+	float dL_dW21 = J[0][2] * dL_dT01 + J[1][2] * dL_dT11;
+	
+	float dL_dW02 = J[0][0] * dL_dT02;
+	float dL_dW12 = J[1][1] * dL_dT12;
+	float dL_dW22 = J[0][2] * dL_dT02 + J[1][2] * dL_dT12;
+
+	dL_dview_matrix[0] += dL_dW00;
+	dL_dview_matrix[1] += dL_dW10;
+	dL_dview_matrix[2] += dL_dW20;
+
+	dL_dview_matrix[4] += dL_dW01;
+	dL_dview_matrix[5] += dL_dW11;
+	dL_dview_matrix[6] += dL_dW21;
+
+	dL_dview_matrix[8] += dL_dW02;
+	dL_dview_matrix[9] += dL_dW12;
+	dL_dview_matrix[10] += dL_dW22;
+	// printf(
+	// 	// "\n\nView Matrix : \n\t%.5f %.5f %.5f %.5f\n\t%.5f %.5f %.5f %.5f\n\t%.5f %.5f %.5f %.5f\n"
+	// 	"mean : %f %f %f\n"
+	// 	// "T Matrix: \n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n"
+	// 	// "J Matrix: \n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n"
+	// 	"cov2d: %f %f %f\n"
+	// 	"dL_dcov2d: %f %f %f\n"
+	// 	"dL_dJ: \n\t%f %f %f %f\n"
+	// 	"end\n\n\n", 
+	// // view_matrix[0], view_matrix[4], view_matrix[8], view_matrix[12],
+	// // view_matrix[1], view_matrix[5], view_matrix[9], view_matrix[13],
+	// // view_matrix[2], view_matrix[6], view_matrix[10], view_matrix[14],
+	// // t.x, t.y, t.z,
+	// // T[0][0], T[1][0], T[2][0], 
+	// // T[0][1], T[1][1], T[2][1], 
+	// // T[0][2], T[1][2], T[2][2],
+	// // J[0][0], J[1][0], J[2][0], 
+	// // J[0][1], J[1][1], J[2][1],
+	// // J[0][2], J[1][2], J[2][2],
+	// // dL_dT00, dL_dT01, dL_dT02,
+	// // dL_dT10, dL_dT11, dL_dT12,
+	// // dL_dJ00, dL_dJ02, dL_dJ11, dL_dJ12
+	// mean.x, mean.y, mean.z,
+	// a, b, c,
+	// dL_da, dL_db, dL_dc,
+	// dL_dJ00, dL_dJ02, dL_dJ11, dL_dJ12
+	// );
+
+	// First index is column, second is row.
+	// dL_dview_matrix[0*4 + 0] = 
+
 	float tz = 1.f / t.z;
 	float tz2 = tz * tz;
 	float tz3 = tz2 * tz;
@@ -267,6 +323,57 @@ __global__ void computeCov2DCUDA(int P,
 	// t = transformPoint4x3(mean, view_matrix);
 	float3 dL_dmean = transformVec4x3Transpose({ dL_dtx, dL_dty, dL_dtz }, view_matrix);
 
+	dL_dview_matrix[0] += dL_dtx * mean.x;
+	dL_dview_matrix[1] += dL_dty * mean.x;
+	dL_dview_matrix[2] += dL_dtz * mean.x;
+
+	dL_dview_matrix[4] += dL_dtx * mean.y;
+	dL_dview_matrix[5] += dL_dty * mean.y;
+	dL_dview_matrix[6] += dL_dtz * mean.y;
+
+	dL_dview_matrix[8] += dL_dtx * mean.z;
+	dL_dview_matrix[9] += dL_dty * mean.z;
+	dL_dview_matrix[10] += dL_dtz * mean.z;
+
+	dL_dview_matrix[12] += dL_dtx;
+	dL_dview_matrix[13] += dL_dty;
+	dL_dview_matrix[14] += dL_dtz;
+
+	// if (dL_da > 1e-5 && dL_db > 1e-5 && dL_dc > 1e-5){
+	// 	printf(
+	// 		"\n\ndL_view : \n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n"
+	// 		"mean : %f %f %f\n"
+	// 		// "T Matrix: \n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n"
+	// 		// "J Matrix: \n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n\t%.5f %.5f %.5f\n"
+	// 		"cov2d: %f %f %f\n"
+	// 		"cov3d: %f %f %f %f %f %f\n"
+	// 		"dL_dcov2d: %f %f %f\n"
+	// 		"dL_dJ: %f %f %f %f\n"
+	// 		"end\n\n\n", 
+	// 		dL_dview_matrix[0], dL_dview_matrix[1], dL_dview_matrix[2],
+	// 		dL_dview_matrix[4], dL_dview_matrix[5], dL_dview_matrix[6],
+	// 		dL_dview_matrix[8], dL_dview_matrix[9], dL_dview_matrix[10],
+	// 		dL_dview_matrix[12], dL_dview_matrix[13], dL_dview_matrix[14],
+	// 	// view_matrix[0], view_matrix[4], view_matrix[8], view_matrix[12],
+	// 	// view_matrix[1], view_matrix[5], view_matrix[9], view_matrix[13],
+	// 	// view_matrix[2], view_matrix[6], view_matrix[10], view_matrix[14],
+	// 	// t.x, t.y, t.z,
+	// 	// T[0][0], T[1][0], T[2][0], 
+	// 	// T[0][1], T[1][1], T[2][1], 
+	// 	// T[0][2], T[1][2], T[2][2],
+	// 	// J[0][0], J[1][0], J[2][0], 
+	// 	// J[0][1], J[1][1], J[2][1],
+	// 	// J[0][2], J[1][2], J[2][2],
+	// 	// dL_dT00, dL_dT01, dL_dT02,
+	// 	// dL_dT10, dL_dT11, dL_dT12,
+	// 	// dL_dJ00, dL_dJ02, dL_dJ11, dL_dJ12
+	// 	mean.x, mean.y, mean.z,
+	// 	a, b, c,
+	// 	cov3D[0], cov3D[1], cov3D[2], cov3D[3], cov3D[4], cov3D[5],
+	// 	dL_da, dL_db, dL_dc,
+	// 	dL_dJ00, dL_dJ02, dL_dJ11, dL_dJ12
+	// 	);
+	// }
 	// Gradients of loss w.r.t. Gaussian means, but only the portion 
 	// that is caused because the mean affects the covariance matrix.
 	// Additional mean gradient is accumulated in BACKWARD::preprocess.
@@ -357,6 +464,7 @@ __global__ void preprocessCUDA(
 	const glm::vec3* campos,
 	const float3* dL_dmean2D,
 	glm::vec3* dL_dmeans,
+	float* dL_dproj_matrix,
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
@@ -381,6 +489,21 @@ __global__ void preprocessCUDA(
 	dL_dmean.x = (proj[0] * m_w - proj[3] * mul1) * dL_dmean2D[idx].x + (proj[1] * m_w - proj[3] * mul2) * dL_dmean2D[idx].y;
 	dL_dmean.y = (proj[4] * m_w - proj[7] * mul1) * dL_dmean2D[idx].x + (proj[5] * m_w - proj[7] * mul2) * dL_dmean2D[idx].y;
 	dL_dmean.z = (proj[8] * m_w - proj[11] * mul1) * dL_dmean2D[idx].x + (proj[9] * m_w - proj[11] * mul2) * dL_dmean2D[idx].y;
+
+	dL_dproj_matrix[0] += dL_dmean2D[idx].x * m.x * m_w;
+	dL_dproj_matrix[4] += dL_dmean2D[idx].x * m.y * m_w;
+	dL_dproj_matrix[8] += dL_dmean2D[idx].x * m.z * m_w;
+	dL_dproj_matrix[12] += dL_dmean2D[idx].x * m_w;
+
+	dL_dproj_matrix[1] += dL_dmean2D[idx].y * m.x * m_w;
+	dL_dproj_matrix[5] += dL_dmean2D[idx].y * m.y * m_w;
+	dL_dproj_matrix[9] += dL_dmean2D[idx].y * m.z * m_w;
+	dL_dproj_matrix[13] += dL_dmean2D[idx].y * m_w;
+
+	dL_dproj_matrix[3] += dL_dmean2D[idx].x * (- m_hom.x * m.x * m_w * m_w) + dL_dmean2D[idx].y * (- m_hom.y * m.x * m_w * m_w);
+	dL_dproj_matrix[7] += dL_dmean2D[idx].x * (- m_hom.x * m.y * m_w * m_w) + dL_dmean2D[idx].y * (- m_hom.y * m.y * m_w * m_w);
+	dL_dproj_matrix[11] += dL_dmean2D[idx].x * (- m_hom.x * m.z * m_w * m_w) + dL_dmean2D[idx].y * (- m_hom.y * m.z * m_w * m_w);
+	dL_dproj_matrix[15] += dL_dmean2D[idx].x * (- m_hom.x * m_w * m_w) + dL_dmean2D[idx].y * (- m_hom.y * m_w * m_w);
 
 	// That's the second part of the mean gradient. Previous computation
 	// of cov2D and following SH conversion also affects it.
@@ -491,12 +614,22 @@ renderCUDA(
 			const float2 xy = collected_xy[j];
 			const float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			const float4 con_o = collected_conic_opacity[j];
-			const float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
-			if (power > 0.0f)
-				continue;
 
+			const float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			// const float base = 1.0f + con_o.x * d.x * d.x + con_o.z * d.y * d.y + 2 * con_o.y * d.x * d.y;
+			if (power > 0.0f)
+				continue;			
+			// if (base < 1.0f)
+			// 	continue;
+
+			// Eq. (2) from 3D Gaussian splatting paper.
+			// Obtain alpha by multiplying with Gaussian opacity
+			// and its exponential falloff from mean.
+			// Avoid numerical instabilities (see paper appendix). 
 			const float G = exp(power);
+			// const float G = pow(base, -1.5f);
 			const float alpha = min(0.99f, con_o.w * G);
+
 			if (alpha < 1.0f / 255.0f)
 				continue;
 
@@ -538,8 +671,12 @@ renderCUDA(
 			const float dL_dG = con_o.w * dL_dalpha;
 			const float gdx = G * d.x;
 			const float gdy = G * d.y;
+			// const float gdx = G * d.x / base;
+			// const float gdy = G * d.y / base;
 			const float dG_ddelx = -gdx * con_o.x - gdy * con_o.y;
 			const float dG_ddely = -gdy * con_o.z - gdx * con_o.y;
+			// const float dG_ddelx = (-gdx * con_o.x - gdy * con_o.y) * 3.f;
+			// const float dG_ddely = (-gdy * con_o.z - gdx * con_o.y) * 3.f;
 
 			// Update gradients w.r.t. 2D mean position of the Gaussian
 			atomicAdd(&dL_dmean2D[global_id].x, dL_dG * dG_ddelx * ddelx_dx);
@@ -549,6 +686,10 @@ renderCUDA(
 			atomicAdd(&dL_dconic2D[global_id].x, -0.5f * gdx * d.x * dL_dG);
 			atomicAdd(&dL_dconic2D[global_id].y, -0.5f * gdx * d.y * dL_dG);
 			atomicAdd(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);
+			
+			// atomicAdd(&dL_dconic2D[global_id].x, -1.5f * gdx * d.x * dL_dG);
+			// atomicAdd(&dL_dconic2D[global_id].y, -1.5f * gdx * d.y * dL_dG);
+			// atomicAdd(&dL_dconic2D[global_id].w, -1.5f * gdy * d.y * dL_dG);
 
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
@@ -574,6 +715,8 @@ void BACKWARD::preprocess(
 	const float3* dL_dmean2D,
 	const float* dL_dconic,
 	glm::vec3* dL_dmean3D,
+	float* dL_dview_matrix,
+	float* dL_dproj_matrix,
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
@@ -595,6 +738,7 @@ void BACKWARD::preprocess(
 		tan_fovy,
 		viewmatrix,
 		dL_dconic,
+		dL_dview_matrix,
 		(float3*)dL_dmean3D,
 		dL_dcov3D);
 
@@ -614,6 +758,7 @@ void BACKWARD::preprocess(
 		campos,
 		(float3*)dL_dmean2D,
 		(glm::vec3*)dL_dmean3D,
+		dL_dproj_matrix,
 		dL_dcolor,
 		dL_dcov3D,
 		dL_dsh,

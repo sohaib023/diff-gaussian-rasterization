@@ -94,7 +94,7 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 	glm::mat3 W = glm::mat3(
 		viewmatrix[0], viewmatrix[4], viewmatrix[8],
 		viewmatrix[1], viewmatrix[5], viewmatrix[9],
-		viewmatrix[2], viewmatrix[6], viewmatrix[10]);
+		viewmatrix[2], viewmatrix[6], viewmatrix[10]) ;
 
 	glm::mat3 T = W * J;
 
@@ -229,7 +229,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float mid = 0.5f * (cov.x + cov.z);
 	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
 	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
-	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+	float my_radius = ceil(12.f * sqrt(max(lambda1, lambda2)));
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
 	uint2 rect_min, rect_max;
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
@@ -333,14 +333,19 @@ renderCUDA(
 			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			float4 con_o = collected_conic_opacity[j];
 			float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			// float base = 1.0f + con_o.x * d.x * d.x + con_o.z * d.y * d.y + 2 * con_o.y * d.x * d.y;
 			if (power > 0.0f)
-				continue;
+				continue;			
+			// if (base < 1.0f)
+			// 	continue;
 
 			// Eq. (2) from 3D Gaussian splatting paper.
 			// Obtain alpha by multiplying with Gaussian opacity
 			// and its exponential falloff from mean.
 			// Avoid numerical instabilities (see paper appendix). 
-			float alpha = min(0.99f, con_o.w * exp(power));
+			float G = exp(power);
+			// float G = pow(base, -1.5f);
+			float alpha = min(0.99f, con_o.w * G);
 			if (alpha < 1.0f / 255.0f)
 				continue;
 			float test_T = T * (1 - alpha);
